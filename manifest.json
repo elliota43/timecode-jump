@@ -23,5 +23,11 @@
             "js": ["content.js"],
             "run_at": "document_idle"
         }
+    ],
+    "web_accessible_resources": [
+        {
+            "resources": ["welcome.html", "welcome.js"],
+            "matches": ["<all_urls>"]
+        }
     ]
 }
