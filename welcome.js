@@ -17,6 +17,6 @@ chrome.commands.getAll((commands) => {
 });
 
 document.getElementById("changeShortcut")?.addEventListener("click", () => {
-  // This may be blocked in some Chrome versions; the page includes a fallback instruction.
+  // This is sometimes blocked by Chrome; the page includes a fallback instruction.
   chrome.tabs.create({ url: "chrome://extensions/shortcuts" });
 });

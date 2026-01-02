@@ -30,7 +30,7 @@
       left: 50%;
       transform: translateX(-50%);
       z-index: 2147483647;
-      display: block;
+      display: none;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     `;
 
@@ -40,7 +40,7 @@
       border: 1px solid rgba(255,255,255,0.12);
       border-radius: 12px;
       padding: 10px 10px;
-      min-width: 320px;
+      min-width: 340px;
       box-shadow: 0 10px 30px rgba(0,0,0,0.45);
       backdrop-filter: blur(10px);
     `;
@@ -74,7 +74,6 @@
 
     const status = document.createElement("div");
     status.style.cssText = `margin-top: 6px; font-size: 12px; color: rgba(255,120,120,0.9); display:none;`;
-    status.textContent = "Couldn’t find a video on this page.";
 
     input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") {
@@ -85,6 +84,7 @@
 
       if (e.key === "Enter") {
         e.preventDefault();
+
         const raw = input.value.trim();
         const seconds = parseTimecode(raw);
 
@@ -108,12 +108,17 @@
         if (dur != null && dur > 0) t = Math.min(t, dur - 0.001);
 
         vid.currentTime = t;
+
+        // some sites listen for these to update UI
         vid.dispatchEvent(new Event("timeupdate", { bubbles: true }));
+        vid.dispatchEvent(new Event("seeking", { bubbles: true }));
+        vid.dispatchEvent(new Event("seeked", { bubbles: true }));
+
         overlay.style.display = "none";
       }
     });
 
-    // Click outside to close (nice UX)
+    // Click outside to close
     overlay.addEventListener("mousedown", (e) => {
       if (e.target === overlay) overlay.style.display = "none";
     });
@@ -126,7 +131,6 @@
     overlay.appendChild(box);
 
     document.documentElement.appendChild(overlay);
-
     return overlay;
   }
 
@@ -139,12 +143,22 @@
     const videos = Array.from(document.querySelectorAll("video"));
     if (videos.length === 0) return null;
 
-    // Prefer the biggest visible video (works well for YouTube + most sites)
+    // Prefer currently playing first
+    const playing = videos.find((v) => !v.paused && !v.ended && v.readyState >= 2);
+    if (playing) return playing;
+
+    // Otherwise prefer biggest visible
     const scored = videos
       .map((v) => {
         const r = v.getBoundingClientRect();
-        const visible = r.width > 0 && r.height > 0 && r.bottom > 0 && r.right > 0 &&
-          r.top < (window.innerHeight || 0) && r.left < (window.innerWidth || 0);
+        const visible =
+          r.width > 0 &&
+          r.height > 0 &&
+          r.bottom > 0 &&
+          r.right > 0 &&
+          r.top < window.innerHeight &&
+          r.left < window.innerWidth;
+
         const area = Math.max(0, r.width) * Math.max(0, r.height);
         return { v, score: (visible ? 1 : 0) * 1_000_000 + area };
       })
@@ -164,14 +178,15 @@
     // pure number => seconds
     if (/^\d+(\.\d+)?$/.test(input)) return Math.floor(Number(input));
 
-    // h/m/s format
-    if (/^\d+h|\d+m|\d+s/i.test(input)) {
-      const m = input.toLowerCase().match(/(\d+)\s*h|(\d+)\s*m|(\d+)\s*s/g);
-      if (!m) return null;
+    // h/m/s format (allow things like 1h2m3s, 2m, 45s)
+    if (/[hms]/i.test(input)) {
+      const parts = input.toLowerCase().match(/\d+\s*[hms]/g);
+      if (!parts) return null;
 
       let total = 0;
-      for (const part of m) {
+      for (const part of parts) {
         const n = parseInt(part, 10);
+        if (Number.isNaN(n)) return null;
         if (part.includes("h")) total += n * 3600;
         else if (part.includes("m")) total += n * 60;
         else if (part.includes("s")) total += n;
@@ -181,16 +196,17 @@
 
     // colon format
     if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(input)) {
-      const parts = input.split(":").map((p) => parseInt(p, 10));
-      if (parts.some((n) => Number.isNaN(n))) return null;
+      const nums = input.split(":").map((p) => parseInt(p, 10));
+      if (nums.some((n) => Number.isNaN(n))) return null;
 
-      if (parts.length === 2) {
-        const [mm, ss] = parts;
+      if (nums.length === 2) {
+        const [mm, ss] = nums;
         if (ss >= 60) return null;
         return mm * 60 + ss;
       }
-      if (parts.length === 3) {
-        const [hh, mm, ss] = parts;
+
+      if (nums.length === 3) {
+        const [hh, mm, ss] = nums;
         if (mm >= 60 || ss >= 60) return null;
         return hh * 3600 + mm * 60 + ss;
       }
@@ -198,7 +214,4 @@
 
     return null;
   }
-
-  // Start hidden by default (so it doesn't appear on load)
-  // We'll create it lazily on first hotkey.
 })();
