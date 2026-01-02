@@ -1,0 +1,27 @@
+{
+    "manifest_version": 3,
+    "name": "Timecode Jump",
+    "version": "0.1.0",
+    "description": "Hotkey -> type a timecode -> jump the current video to that time.  No more scrubbing!",
+    "permissions": ["activeTab"],
+    "host_permissions": ["<all_urls>"],
+    "background": {
+        "service_worker": "background.js"
+    },
+    "commands": {
+        "open-timecode": {
+            "suggested_key": {
+                "default": "Ctrl+Shift+J",
+                "mac": "Command+MacCtrl+J"
+            },
+            "description": "Open timecode input"
+        }
+    },
+    "content_scripts": [
+        {
+            "matches": ["<all_urls>"],
+            "js": ["content.js"],
+            "run_at": "document_idle"
+        }
+    ]
+}
