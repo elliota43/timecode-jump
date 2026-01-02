@@ -2,8 +2,34 @@
   const ID = "__timejump_overlay__";
   const LAST_KEY = "__timejump_last__";
 
+  let activeVideo = null;
+  let ro = null;
+
   chrome.runtime.onMessage.addListener((msg) => {
     if (msg?.type === "TIMEJUMP_TOGGLE") toggleOverlay();
+  });
+
+  window.addEventListener(
+    "resize",
+    () => {
+      const overlay = document.getElementById(ID);
+      if (overlay && overlay.style.display !== "none") positionBoxOverVideo(overlay);
+    },
+    { passive: true }
+  );
+
+  window.addEventListener(
+    "scroll",
+    () => {
+      const overlay = document.getElementById(ID);
+      if (overlay && overlay.style.display !== "none") positionBoxOverVideo(overlay);
+    },
+    { passive: true, capture: true }
+  );
+
+  document.addEventListener("fullscreenchange", () => {
+    const overlay = document.getElementById(ID);
+    if (overlay && overlay.style.display !== "none") positionBoxOverVideo(overlay);
   });
 
   function toggleOverlay() {
@@ -18,6 +44,7 @@
       input.value = localStorage.getItem(LAST_KEY) || "";
       input.focus();
       input.select();
+      positionBoxOverVideo(overlay);
     }
   }
 
@@ -26,16 +53,17 @@
     overlay.id = ID;
     overlay.style.cssText = `
       position: fixed;
-      top: 18px;
-      left: 50%;
-      transform: translateX(-50%);
+      inset: 0;
       z-index: 2147483647;
       display: none;
+      background: transparent;
       font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
     `;
 
     const box = document.createElement("div");
+    box.dataset.timejumpBox = "1";
     box.style.cssText = `
+      position: fixed;
       background: rgba(20, 20, 25, 0.92);
       border: 1px solid rgba(255,255,255,0.12);
       border-radius: 12px;
@@ -102,14 +130,12 @@
         localStorage.setItem(LAST_KEY, raw);
         status.style.display = "none";
 
-        // clamp within duration if known
         const dur = Number.isFinite(vid.duration) ? vid.duration : null;
         let t = Math.max(0, seconds);
         if (dur != null && dur > 0) t = Math.min(t, dur - 0.001);
 
         vid.currentTime = t;
 
-        // some sites listen for these to update UI
         vid.dispatchEvent(new Event("timeupdate", { bubbles: true }));
         vid.dispatchEvent(new Event("seeking", { bubbles: true }));
         vid.dispatchEvent(new Event("seeked", { bubbles: true }));
@@ -118,7 +144,6 @@
       }
     });
 
-    // Click outside to close
     overlay.addEventListener("mousedown", (e) => {
       if (e.target === overlay) overlay.style.display = "none";
     });
@@ -131,7 +156,39 @@
     overlay.appendChild(box);
 
     document.documentElement.appendChild(overlay);
+
     return overlay;
+  }
+
+  function positionBoxOverVideo(overlay) {
+    const box = overlay.querySelector("[data-timejump-box]");
+    if (!box) return;
+
+    const vid = findBestVideo();
+    if (!vid) return;
+
+    if (vid !== activeVideo) {
+      activeVideo = vid;
+      if (ro) ro.disconnect();
+      ro = new ResizeObserver(() => requestAnimationFrame(() => positionBoxOverVideo(overlay)));
+      ro.observe(vid);
+    }
+
+    const r = vid.getBoundingClientRect();
+    const fallback = r.width < 50 || r.height < 50;
+    const targetCx = fallback ? window.innerWidth / 2 : r.left + r.width / 2;
+    const targetCy = fallback ? window.innerHeight / 2 : r.top + r.height / 2;
+
+    const boxRect = box.getBoundingClientRect();
+    let left = targetCx - boxRect.width / 2;
+    let top = targetCy - boxRect.height / 2;
+
+    const pad = 10;
+    left = Math.max(pad, Math.min(left, window.innerWidth - boxRect.width - pad));
+    top = Math.max(pad, Math.min(top, window.innerHeight - boxRect.height - pad));
+
+    box.style.left = `${left}px`;
+    box.style.top = `${top}px`;
   }
 
   function showError(el, msg) {
@@ -143,11 +200,9 @@
     const videos = Array.from(document.querySelectorAll("video"));
     if (videos.length === 0) return null;
 
-    // Prefer currently playing first
     const playing = videos.find((v) => !v.paused && !v.ended && v.readyState >= 2);
     if (playing) return playing;
 
-    // Otherwise prefer biggest visible
     const scored = videos
       .map((v) => {
         const r = v.getBoundingClientRect();
@@ -167,18 +222,11 @@
     return scored[0]?.v || null;
   }
 
-  // Supports:
-  // - "90" (seconds)
-  // - "1:23" (mm:ss)
-  // - "01:02:03" (hh:mm:ss)
-  // - "1h2m3s", "2m", "45s"
   function parseTimecode(input) {
     if (!input) return null;
 
-    // pure number => seconds
     if (/^\d+(\.\d+)?$/.test(input)) return Math.floor(Number(input));
 
-    // h/m/s format (allow things like 1h2m3s, 2m, 45s)
     if (/[hms]/i.test(input)) {
       const parts = input.toLowerCase().match(/\d+\s*[hms]/g);
       if (!parts) return null;
@@ -194,7 +242,6 @@
       return total;
     }
 
-    // colon format
     if (/^\d{1,2}:\d{2}(:\d{2})?$/.test(input)) {
       const nums = input.split(":").map((p) => parseInt(p, 10));
       if (nums.some((n) => Number.isNaN(n))) return null;
